@@ -1,9 +1,11 @@
-from math import sqrt
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from scipy.spatial.distance import cdist
 
 
-def parse():
+def parse(filename):
     scanners = []
-    with open("ex.in") as f:
+    with open(filename) as f:
         scanner = []
         for line in f.readlines():
             line = line.strip()
@@ -12,160 +14,131 @@ def parse():
             elif line.startswith("---"):
                 scanner = []
             elif line:
-                coord = tuple([int(e) for e in line.split(",")])
+                coord = np.array([int(e) for e in line.split(",")])
                 scanner.append(coord)
-        scanners.append(scanner)  # last scanner
-
+        scanners.append(scanner)  # append last scanner
     return scanners
 
 
-def pow2(n):
-    return n ** 2
+def rotate_about_x(coordinate, quarters=1):
+    r = R.from_rotvec(quarters * 90 * np.array([1, 0, 0]), degrees=True)
+    return r.apply(coordinate)
 
 
-def distance(*coord):
-    return sqrt(sum(map(pow2, *coord)))
+def rotate_about_y(coordinate, quarters=1):
+    r = R.from_rotvec(quarters * 90 * np.array([0, 1, 0]), degrees=True)
+    return r.apply(coordinate)
 
 
-def sufficiently_equal(this, that):
-    assert this >= 0 and that >= 0
-    acceptable_diff = 10e-2
-    return abs(this - that) <= acceptable_diff
+def rotate_about_z(coordinate, quarters=1):
+    r = R.from_rotvec(quarters * 90 * np.array([0, 0, 1]), degrees=True)
+    return r.apply(coordinate)
 
 
-def possible_neighbours(scanner_a, scanner_b):
-    for beacon_a in scanner_a:
-        for beacon_b in scanner_b:
-            distance_a = distance(beacon_a)
-            distance_b = distance(beacon_b)
-            if sufficiently_equal(distance_a, distance_b):
-                print(distance_a, distance_b)
-                print("sufficiently equal:", beacon_a, beacon_b)
-                return beacon_a
-    return None
-
-
-def rotate_axes(coord, by=None):
-    if by is None:
-        by = 1
-    for _ in range(by):
-        coord = coord[1:] + tuple([coord[0]])
-    return coord
-
-
-from itertools import product
-
-
-def arrangements():
-    for rot in range(3):
-        for a in product([1, -1], repeat=3):
-            yield (a, rot)
-
-
-def add(offset, coord):
-    return tuple([sum(e) for e in zip(offset, coord)])
-
-
-def arrange(coefficients, coord):
-    return tuple([coefficient * val for coefficient, val in zip(coefficients, coord)])
-
-
-def add_relative(offset, beacons):
-    return tuple([add(offset, coord) for coord in beacons])
+def orientations(beacons, beacon):
+    for x in range(4):
+        for y in range(4):
+            for z in range(4):
+                x_beacons = rotate_about_x(beacons, x)
+                x_scanner = rotate_about_x(beacon, x)
+                xy_beacons = rotate_about_y(x_beacons, y)
+                xy_scanner = rotate_about_y(x_scanner, y)
+                xyz_beacons = rotate_about_z(xy_beacons, z)
+                xyz_scanner = rotate_about_z(xy_scanner, z)
+                yield xyz_beacons, xyz_scanner
 
 
 def as_set(scanner):
-    result = set()
-    for coord in scanner:  # todo rewrite
-        result.add(tuple((coord)))
-    return result
+    return set([str(b) for b in np.rint(scanner)])
 
 
-from itertools import permutations
+def all_distances(beacon, beacons):
+    return cdist([beacon], beacons, "euclidean")[0]
 
 
-def apply_arrangement(scanner, arrangement):
-    arranged_scanner = []
-    coefficients, rot = arrangement
-    for coord in scanner:
-        # coord = rotate_axes(coord, by=rot)
-        coord = arrange(coefficients, coord)
-        for p in permutations(coord, 3):
-            arranged_scanner.append(p)
-    return arranged_scanner
+def find_beacon_pair(scanner_a, scanner_b):
+    for beacon_a in scanner_a:
+        a_distance = all_distances(beacon_a, scanner_a)
+        a_distance_set = as_set(a_distance)
+        for beacon_b in scanner_b:
+            b_distance = all_distances(beacon_b, scanner_b)
+            b_distance_set = as_set(b_distance)
 
+            intersection = a_distance_set & b_distance_set
+            if len(intersection) >= 12:  # they are the same beacon
+                print("found a beacon-pair")
+                return beacon_a, beacon_b
 
-from copy import deepcopy
-
-
-def at_least_12(base: set, offset, scanner):
-    for arrangement in arrangements():
-        scanner_local = deepcopy(scanner)
-        arranged_scanner = apply_arrangement(scanner_local, arrangement)
-        translated_arranged_scanner = add_relative(offset, arranged_scanner)
-
-        scanner_set = as_set(translated_arranged_scanner)
-        print(offset in scanner_set)
-        intersection = len(base.intersection(scanner_set))
-        # print(scanner_set)
-        print("intersection", intersection)
-        if intersection >= 12:
-            print("intersection", intersection)
-            return scanner_set
-
-
-scanners = parse()
-
-# base = as_set(scanners[0])
-# print(at_least_12(base, scanners[1]))
-# print(at_least_12(base, scanners[2]))
-# print(at_least_12(base, scanners[3]))
 
 from queue import Queue
 
-q = Queue()
-for scanner in scanners:
-    q.put(scanner)
 
-base = set()
-while not q.empty():
-    scanner = q.get()
-    if not base:  # first scanner
-        base |= as_set(scanner)
-    else:
-        print("hej", q.qsize())
-        # if offset := possible_neighbours(base, scanner):
-        pn = possible_neighbours(base, scanner)
-        if pn:
-            print("offset", offset)
-            res = at_least_12(base, offset, scanner)
-            print("res", res)
-            if res is not None:
-                print("Hejsan")
-                import sys
-
-                sys.exit(0)
+def queue_up(lst):
+    q = Queue()
+    [q.put(elem) for elem in lst]
+    return q
 
 
-# for i, ie in enumerate(scanners):
-#     for j, je in enumerate(scanners):
-#         if i == j:
-#             continue
+def find_correct_orientation(pair, base, beacons):
+    print("pair", pair)
+    base_beacon, beacon = pair
+    base_set = as_set(base - base_beacon)
 
-#         if (offset := possible_neighbours(ie, je)) is not None:
-#             base = as_set(ie)
-#             print("offset", offset)
+    translated_beacons = beacons - beacon
+    for oriented_beacons, oriented_scanner in orientations(translated_beacons, -beacon):
+        intersection = as_set(oriented_beacons) & base_set
+        if len(intersection) >= 12:
+            return oriented_beacons, oriented_scanner
 
-#             res = at_least_12(base, offset, je)
-#             print("res", res)
+
+def solve(scanners):
+    q = queue_up(scanners)
+
+    res = set()
+    base = None
+    relative_scanners = None
+    while not q.empty():
+        print(q.qsize())
+        beacons = q.get()
+        if base is None:
+            base = np.array(beacons)
+            res |= as_set(beacons)
+            relative_scanners = np.array([[0, 0, 0]])
+            continue
+
+        pair = find_beacon_pair(base, beacons)
+        if pair is None:
+            print("pair is None")
+            q.put(beacons)
+        else:
+            oriented_beacons, oriented_scanner = find_correct_orientation(
+                pair, base, beacons
+            )
+            if oriented_beacons is None:
+                print("oriented_beacons is None")
+                q.put(beacons)
+                continue
+
+            base_beacon, _ = pair
+            translated_beacons = oriented_beacons + base_beacon
+
+            base = np.append(base, np.array(translated_beacons), axis=0)
+            res |= as_set(translated_beacons)
+
+            translated_scanner = oriented_scanner + base_beacon
+            relative_scanners = np.append(
+                relative_scanners, [translated_scanner], axis=0
+            )
+
+    print(len(res))
+    highest = 0
+    for a in relative_scanners:
+        for b in relative_scanners:
+            manhattan = sum(abs(e1 - e2) for e1, e2 in zip(a, b))
+            highest = max(highest, manhattan)
+    print(highest)
 
 
-assert rotate_axes((1, 2, 3)) == ((2, 3, 1))
-assert rotate_axes((1, 2, 3), by=2) == ((3, 1, 2))
-assert rotate_axes((1, 2, 3), by=3) == ((1, 2, 3))
+scanners = parse("1.in")
 
-assert add((1, 2, 3), (1, 2, 3)) == (2, 4, 6)
-assert add((2, 2, 2), (1, 1, 1)) == (3, 3, 3)
-
-# for arrangement in arrangements():
-#     print(apply_arrangment([[1, 2, 3]], arrangement))
+solve(scanners)
